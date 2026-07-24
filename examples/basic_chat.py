@@ -1,8 +1,7 @@
 """
-示例 1: 基础对话 — 最简单的双脑模式。
+示例 1: 基础对话 — 最简模式。
 
-直接与云端对话，不接传感器，不压缩。
-适合：首次使用，验证 API 连接。
+直接与云端对话，不接传感器。验证 API 连接。
 
 用法:
     python -m examples.basic_chat
@@ -15,22 +14,24 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from line.cloud.bridge import CloudBridge
+from line.edge.compressor import SemanticProtocol
 
 
 async def main():
     bridge = CloudBridge()
     await bridge.initialize()
-    
-    print("Line 双脑 · 基础对话模式\n")
-    
+
+    print("Line · 基础对话模式\n")
+
     while True:
         user_input = input("👤 ").strip()
         if not user_input:
             continue
         if user_input.lower() in ("exit", "quit"):
             break
-        
-        response = await bridge.ask(user_input)
+
+        upstream = SemanticProtocol.build_upstream(user_input=user_input)
+        response = await bridge.ask(upstream=upstream)
         print(f"\n🤖 {response['content']}\n")
 
 
