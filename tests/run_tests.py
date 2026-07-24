@@ -155,6 +155,42 @@ def test_attention_level_parse_fallback():
     assert CloudBridge._parse_attention_level("l:notanumber") == 0.5
 
 
+def test_proactive_turn_triggers_on_threshold():
+    """环境阈值越界 + 冷却期外 → 主动触发，返回 upstream 包。"""
+    from line.edge.processor import EdgeProcessor
+    edge = EdgeProcessor({"proactive_cooldown": 60.0})
+    up = edge.maybe_proactive_turn({"temperature": [{"value": 39.0, "unit": "°C"}]}, now=1000.0)
+    assert up is not None, "高温+冷却外应主动触发"
+    assert up.get("meta", {}).get("proactive") is True, "应标记 proactive"
+    assert "[主动环境推理]" in up["user"], up["user"]
+
+
+def test_proactive_turn_cooldown_blocks():
+    """冷却期内重复异常不再触发，省 token。"""
+    from line.edge.processor import EdgeProcessor
+    edge = EdgeProcessor({"proactive_cooldown": 60.0})
+    # t=1000 触发一次
+    assert edge.maybe_proactive_turn({"temperature": [{"value": 39.0, "unit": "°C"}]}, now=1000.0) is not None
+    # t=1030 在 60s 冷却内 → 不触发
+    assert edge.maybe_proactive_turn({"temperature": [{"value": 39.0, "unit": "°C"}]}, now=1030.0) is None
+    # t=1061 过冷却 → 再次触发
+    assert edge.maybe_proactive_turn({"temperature": [{"value": 39.0, "unit": "°C"}]}, now=1061.0) is not None
+
+
+def test_proactive_turn_no_trigger_on_normal():
+    """正常环境不主动触发。"""
+    from line.edge.processor import EdgeProcessor
+    edge = EdgeProcessor({})
+    assert edge.maybe_proactive_turn({"temperature": [{"value": 24.0, "unit": "°C"}]}, now=1000.0) is None
+
+
+def test_proactive_turn_no_trigger_empty():
+    """空数据不触发。"""
+    from line.edge.processor import EdgeProcessor
+    edge = EdgeProcessor({})
+    assert edge.maybe_proactive_turn({}, now=1000.0) is None
+
+
 def test_cloudbridge_ask_no_key_degrades():
     """无 API key 时 ask 应优雅降级，不抛异常。"""
     import asyncio

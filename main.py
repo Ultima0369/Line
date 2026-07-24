@@ -13,6 +13,7 @@ Line — 双脑异构体认知框架 · 主入口
 import asyncio
 import sys
 import os
+import time
 import logging
 from pathlib import Path
 
@@ -117,17 +118,33 @@ async def interactive_mode():
 
     edge.on_upstream(upstream_handler)
 
-    # 传感器轮询 → 注意力评估：读数喂给注意力过滤器，
-    # 超阈值的环境事件入队，下一轮对话前注入。
+    # 主动推理队列：环境异常触发的云端回复排这里，对话循环 drain 显示。
+    # 不在轮询协程里直接打印——会和 input() 抢终端。排进队列，等用户回车间隙显示。
+    proactive_queue: asyncio.Queue = asyncio.Queue()
+
+    # 传感器轮询 → 注意力评估 → 决定是否主动触发云端推理
     async def attention_on_batch(batch):
         edge.evaluate_sensor_batch(batch)
+        # maybe_proactive_turn 内部有冷却约束，不会每轮都触发
+        proactive_upstream = edge.maybe_proactive_turn(batch, time.time())
+        if proactive_upstream is not None:
+            asyncio.create_task(_run_proactive(proactive_upstream))
+
+    async def _run_proactive(upstream: dict):
+        """独立协程：跑主动云端推理，结果入队。不阻塞对话循环。"""
+        try:
+            cloud_response = await cloud.ask(upstream=upstream)
+            await edge.receive_downstream(cloud_response)
+            await proactive_queue.put(cloud_response)
+        except Exception as e:
+            logger.error(f"主动推理失败: {e}")
 
     sensor_manager.on_batch(attention_on_batch)
 
     # 启动传感器轮询
     if sensor_config.get("enabled", False) or sensor_config.get("mock", True):
         sensor_manager.start_polling(interval=5.0)
-        logger.info("🔄 传感器轮询已启动 (每5秒, 注意力评估已接入)")
+        logger.info("🔄 传感器轮询已启动 (每5秒, 注意力评估 + 主动推理已接入)")
 
     print("\n  🤖 双脑就绪。输入你的消息开始对话。")
     print("  📝 输入 /help 查看命令  |  /exit 退出\n")
@@ -141,6 +158,17 @@ async def interactive_mode():
                 print()
                 for a in alerts:
                     print(f"  {a}")
+
+            # 显示主动推理结果（环境异常触发的云端回复，非阻塞）
+            while not proactive_queue.empty():
+                try:
+                    resp = proactive_queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    break
+                print()
+                print("  ┌─ 🧠 主动环境推理（小脑主动叫醒大脑）")
+                print(f"  │ {resp.get('content', '')[:300]}")
+                print(f"  └─ (T:{resp.get('temperature', '?')})")
             try:
                 user_input = await asyncio.get_event_loop().run_in_executor(
                     None, lambda: input("  👤 ")

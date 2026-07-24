@@ -53,6 +53,12 @@ class EdgeProcessor:
         # 待注入的环境事件队列（轮询产出、对话循环消费）
         self._pending_alerts: List[str] = []
 
+        # 主动推理节流：环境持续异常（如一直高温）时，不能每轮轮询都触发云端烧 token。
+        # 冷却期内重复的异常不再触发独立 reasoning turn，只维持 alert 注入。
+        # ponytail: 单变量冷却，按墙钟时间；要更细可换 per-source 冷却表。
+        self._proactive_cooldown: float = self.config.get("proactive_cooldown", 60.0)
+        self._last_proactive_ts: float = 0.0
+
     async def initialize(self) -> None:
         """初始化边缘处理器。"""
         mode = self.config.get("mode", "api")
@@ -170,6 +176,47 @@ class EdgeProcessor:
         alerts = self._pending_alerts
         self._pending_alerts = []
         return alerts
+
+    def maybe_proactive_turn(self, sensor_data: Dict, now: float) -> Optional[Dict]:
+        """决定是否就当前环境主动触发一轮云端推理。
+
+        双脑做实的点：本地侧（小脑）不再只被动等用户输入——当环境出现
+        值得关注的异常且过了冷却期，它主动构造一个上行包，让云端就环境
+        变化发起独立思考，再把结论提示给用户。
+
+        返回一个 upstream 包（应交给 cloud.ask），或 None（不触发）。
+        冷却逻辑保证同一异常不会每轮都烧 token。
+
+        now: 当前墙钟时间戳（由调用方传入，避免本模块依赖 time/time.time 的副作用，
+              也便于测试注入）。
+        """
+        if not sensor_data:
+            return None
+        if now - self._last_proactive_ts < self._proactive_cooldown:
+            return None
+
+        # 复用注意力评估：若有任一维度硬触发（物理阈值越界），才考虑主动推理
+        top = self.evaluate_sensor_batch(sensor_data)
+        if top is None or top.priority < 0.9:
+            return None
+
+        # 构造一个环境导向的主动上行包：用户字段留空标记，user 输入是
+        # 一段描述当前环境异常的提示，让云端就环境本身回复。
+        alert = self._pending_alerts[-1] if self._pending_alerts else str(top.content)
+        proactive_input = (
+            f"[主动环境推理] 检测到环境异常：{alert}。"
+            f"请基于当前传感器数据，简短判断这是否需要用户注意，并给出一句建议。"
+        )
+        upstream = self.protocol.build_upstream(
+            user_input=proactive_input,
+            sensor_data=sensor_data,
+            attention_state=self.attention.get_context_summary(),
+            context=self.context.get_summary(),
+            metadata={"proactive": True},
+        )
+        self._last_proactive_ts = now
+        logger.info(f"主动触发云端推理 (冷却 {self._proactive_cooldown}s): {alert}")
+        return upstream
 
     async def receive_downstream(self, cloud_response: Dict) -> str:
         """接收并处理云端回复。"""
