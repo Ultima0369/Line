@@ -1,82 +1,52 @@
 # ============================================
 # Line Framework 配置文件
+# 复制为 config.yaml 后填写。config.yaml 已被 .gitignore 忽略。
+# 也可以不写文件，用环境变量 DEEPSEEK_API_KEY 设置密钥（推荐）。
 # ============================================
 
 # --- 云端连接 ---
 cloud:
-  api_key: ""              # DeepSeek API密钥（必填）
+  api_key: ""                 # DeepSeek API密钥。留空则读环境变量 DEEPSEEK_API_KEY
   base_url: "https://api.deepseek.com"
-  model: "deepseek-reasoner"  # 云端模型
-  timeout: 60               # 超时秒数
-  max_retries: 3            # 重试次数
+  model: "deepseek-reasoner"  # deepseek-reasoner (带推理) | deepseek-chat
+  timeout: 60                 # 超时秒数
 
 # --- 本地边缘处理 ---
 edge:
   enabled: true
-  mode: "api"               # "api" | "local_model" | "rule"
-  
-  # mode = "api" 时的小模型配置
-  mini_model:
-    api_key: ""             # 若与云端不同则填写
-    model: "deepseek-chat"  # 小型模型
-    max_tokens: 512
-  
-  # mode = "local_model" 时的配置（需安装torch+transformers）
+  mode: "api"                 # "api" (转发云端) | "local_model" (占位，见下)
+  interrupt_threshold: 0.7    # 注意力分数超过此值的环境事件会注入对话
+
+  # mode = "local_model" 时的配置
+  # 注意：本地推理加载逻辑当前为占位（需 transformers+torch 手动启用），
+  # 未实现前会回退到 api 模式。
   local_model:
-    name: ""                # HuggingFace模型名，如 "Qwen/Qwen2.5-1.5B-Instruct"
-    device: "cpu"           # "cpu" | "cuda"
-    quantize: true          # 是否量化
+    name: ""                  # HuggingFace模型名，如 "Qwen/Qwen2.5-1.5B-Instruct"
+    device: "cpu"             # "cpu" | "cuda"
 
   # 上下文管理
   context:
-    max_turns: 20           # 本地保留的最大对话轮次
-    summary_threshold: 10   # 超过此轮次开始自动摘要压缩
-    enable_compression: true
+    max_turns: 20             # 本地保留的最大对话轮次
+    summary_threshold: 10     # 超过此轮次开始摘要
 
 # --- 传感器 ---
 sensor:
-  enabled: false            # 有传感器硬件时设为true
-  scan_on_start: true       # 启动时自动扫描可用传感器
-  mock: true                # 无硬件时用模拟数据
-  
-  drivers:
-    # 温湿度 (DHT11/DHT22)
-    dht:
-      enabled: false
-      pin: 4                # GPIO引脚号（树莓派）
-      type: "DHT22"         # DHT11 或 DHT22
-    
-    # 气压 (BMP280/BME280)
-    pressure:
-      enabled: false
-      bus: 1                # I2C总线
-      address: 0x76         # I2C地址
-    
-    # 光照 (BH1750)
-    light:
-      enabled: false
-      bus: 1
-      address: 0x23
+  enabled: false              # 有传感器硬件时设为 true
+  mock: true                  # 无硬件时用模拟数据（开发/演示用）
+  interval: 5                 # 轮询间隔（秒）
 
-    # 系统传感器（CPU温度、内存等）
+  drivers:
+    # 系统传感器（CPU温度、内存等，跨平台，依赖 psutil）
     system:
       enabled: true
-      interval: 10          # 采集间隔（秒）
 
-    # 音频 (麦克风)
-    audio:
-      enabled: false
-      device: null          # null = 默认设备
-      sample_rate: 16000
-
-# --- 语义协议 ---
-protocol:
-  compression_level: 3      # 1-5，越高压缩越狠
-  enable_encryption: false  # 是否编码特征向量（不是真加密，而是语义编码）
-  sync_interval: 5          # 云端同步间隔（秒）
+    # 真实硬件驱动（树莓派，路线图未完成，当前占位）：
+    # dht:    { enabled: false, pin: 4,  type: "DHT22" }   # 温湿度
+    # bmp280: { enabled: false, bus: 1, address: 0x76 }    # 气压
+    # bh1750: { enabled: false, bus: 1, address: 0x23 }    # 光照
 
 # --- 日志 ---
 logging:
-  level: "INFO"             # DEBUG | INFO | WARNING | ERROR
+  level: "INFO"               # DEBUG | INFO | WARNING | ERROR
   file: "line.log"
   console: true

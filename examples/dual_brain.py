@@ -33,7 +33,7 @@ async def main():
     
     # 初始化各模块
     sensor = SensorManager()
-    edge = EdgeProcessor({"compression_level": 3})
+    edge = EdgeProcessor({})
     cloud = CloudBridge()
     
     await sensor.scan({"mock": True})
