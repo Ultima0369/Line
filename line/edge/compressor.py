@@ -36,19 +36,35 @@ class SemanticProtocol:
 
     REVERSE_SHORTHAND = {v: k for k, v in TYPE_SHORTHAND.items()}
 
+    # system 传感器子指标 → 缩写（cpu_temp/cpu_percent/memory_percent 等）
+    SYS_METRIC_SHORTHAND = {
+        "cpu_temp": "cputmp",
+        "cpu_percent": "cpupct",
+        "memory_percent": "mempct",
+    }
+
     @classmethod
     def encode_sensor_data(cls, data: Dict) -> str:
         """将传感器数据编码为紧凑字符串。
 
         输入: {"temperature": [{"value": 26.5, "unit": "°C"}, ...], ...}
         输出: "tmp:26.5|hum:58.2|prs:1013"
+        composite 值（如 system 的 dict）按子指标展开:
+        "sys:cputmp:27.9|cpupct:2.1|mempct:46.9"
         """
         parts = []
         for sensor_type, readings in data.items():
             shorthand = cls.TYPE_SHORTHAND.get(sensor_type, sensor_type[:3])
-            if readings:
-                first = readings[0]
-                val = first.get("value") if isinstance(first, dict) else first.value
+            if not readings:
+                continue
+            first = readings[0]
+            val = first.get("value") if isinstance(first, dict) else first.value
+            if isinstance(val, dict):
+                # composite 传感器：展开每个子指标
+                for metric, mval in val.items():
+                    mshort = cls.SYS_METRIC_SHORTHAND.get(metric, metric[:6])
+                    parts.append(f"{shorthand}:{mshort}:{mval}")
+            else:
                 parts.append(f"{shorthand}:{val}")
         return "|".join(parts)
 

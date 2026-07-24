@@ -19,21 +19,20 @@ EXAMPLE_CONFIG_PATH = Path(__file__).parent.parent / "config.example.yaml"
 class Config:
     """配置管理器（单例模式）。"""
 
-    _instance = None
-    _data: Dict[str, Any] = {}
+    _instance: Optional["Config"] = None
 
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
+            # 实例属性而非类变量，避免跨实例/跨测试的状态泄漏
+            cls._instance._data: Dict[str, Any] = {}
         return cls._instance
 
     def load(self, path: Optional[str] = None) -> Dict[str, Any]:
         """加载配置文件。
-        
+
         先找 config.yaml（用户配置），找不到则用 config.example.yaml。
         """
-        config_path = Path(path) if path else DEFAULT_CONFIG_PATH or EXAMPLE_CONFIG_PATH
-        
         if path:
             config_path = Path(path)
         elif DEFAULT_CONFIG_PATH.exists():
@@ -42,7 +41,7 @@ class Config:
             config_path = EXAMPLE_CONFIG_PATH
         else:
             raise FileNotFoundError(
-                f"配置文件不存在。请将 config.example.yaml 复制为 config.yaml 并填写API Key。"
+                "配置文件不存在。请将 config.example.yaml 复制为 config.yaml 并填写API Key。"
             )
 
         with open(config_path, "r", encoding="utf-8") as f:

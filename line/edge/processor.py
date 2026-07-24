@@ -53,7 +53,7 @@ class EdgeProcessor:
         # 待注入的环境事件队列（轮询产出、对话循环消费）
         self._pending_alerts: List[str] = []
 
-    async def initialize(self):
+    async def initialize(self) -> None:
         """初始化边缘处理器。"""
         mode = self.config.get("mode", "api")
         logger.info(f"边缘处理器初始化 (mode={mode})")
@@ -136,23 +136,32 @@ class EdgeProcessor:
             if not readings:
                 continue
             first = readings[0]
-            value = first.get("value") if isinstance(first, dict) else getattr(first, "value", None)
-            if not isinstance(value, (int, float)):
-                continue
-            signal = self.attention.evaluate(sensor_type, value)
-            if top_signal is None or signal.attention_score > top_signal.attention_score:
-                top_signal = signal
+            raw = first.get("value") if isinstance(first, dict) else getattr(first, "value", None)
 
-            # 物理阈值越界是硬触发：priority=0.9 表示读数越过健康区间，
-            # 不该被"新奇度低/变化慢"稀释掉。混合分数低于阈值也照常打断。
-            # ponytail: 物理边界优先于统计新奇度，这是正确性的部分，不简化。
-            should_fire = signal.priority >= 0.9 or signal.should_interrupt(self._interrupt_threshold)
-            if should_fire:
-                unit = first.get("unit", "") if isinstance(first, dict) else getattr(first, "unit", "")
-                alert = f"⚠️ 环境事件: {sensor_type}={value}{unit} (注意力 {signal.attention_score:.2f})"
-                if alert not in self._pending_alerts[-3:]:
-                    self._pending_alerts.append(alert)
-                    logger.info(alert)
+            # composite 传感器（如 system 的 {cpu_temp, cpu_percent, memory_percent}）
+            # 拆成子指标逐个评估，否则整批里 system 永远被 skip。
+            if isinstance(raw, dict):
+                sub_items = [(f"{sensor_type}.{k}", v) for k, v in raw.items()
+                             if isinstance(v, (int, float))]
+            elif isinstance(raw, (int, float)):
+                sub_items = [(sensor_type, raw)]
+            else:
+                continue
+
+            for sub_source, value in sub_items:
+                signal = self.attention.evaluate(sub_source, value)
+                if top_signal is None or signal.attention_score > top_signal.attention_score:
+                    top_signal = signal
+
+                # 物理阈值越界是硬触发：priority=0.9 表示读数越过健康区间，
+                # 不该被"新奇度低/变化慢"稀释掉。混合分数低于阈值也照常打断。
+                # ponytail: 物理边界优先于统计新奇度，这是正确性的部分，不简化。
+                should_fire = signal.priority >= 0.9 or signal.should_interrupt(self._interrupt_threshold)
+                if should_fire:
+                    alert = f"⚠️ 环境事件: {sub_source}={value} (注意力 {signal.attention_score:.2f})"
+                    if alert not in self._pending_alerts[-3:]:
+                        self._pending_alerts.append(alert)
+                        logger.info(alert)
 
         return top_signal
 
@@ -175,7 +184,7 @@ class EdgeProcessor:
 
         return response_text
 
-    def on_upstream(self, callback: Callable[[Dict], Awaitable[None]]):
+    def on_upstream(self, callback: Callable[[Dict], Awaitable[None]]) -> None:
         """注册上行数据包回调。"""
         self._on_upstream.append(callback)
 

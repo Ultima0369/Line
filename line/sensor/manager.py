@@ -43,7 +43,7 @@ class SensorManager:
             logger.warning(f"❌ 传感器初始化失败: {sensor}")
         return ok
 
-    def unregister(self, sensor_id: str):
+    def unregister(self, sensor_id: str) -> None:
         """注销一个传感器。"""
         sensor = self._sensors.pop(sensor_id, None)
         if sensor:
@@ -124,15 +124,15 @@ class SensorManager:
             logger.error(f"读取传感器 {sensor.sensor_id} 失败: {e}")
             return None
 
-    def on_reading(self, callback: Callable[[SensorReading], Awaitable[None]]):
+    def on_reading(self, callback: Callable[[SensorReading], Awaitable[None]]) -> None:
         """注册读数回调（每次读取完成后触发）。"""
         self._callbacks.append(callback)
 
-    def on_batch(self, callback: Callable[[Dict[str, List[SensorReading]]], Awaitable[None]]):
+    def on_batch(self, callback: Callable[[Dict[str, List[SensorReading]]], Awaitable[None]]) -> None:
         """注册批量读数回调（每次完整轮询后触发，收全部分组结果）。"""
         self._batch_callbacks.append(callback)
 
-    def start_polling(self, interval: float = 5.0):
+    def start_polling(self, interval: float = 5.0) -> None:
         """启动持续轮询。"""
         if self._polling_task:
             return
@@ -148,12 +148,12 @@ class SensorManager:
         self._polling_task = asyncio.create_task(_poll())
         logger.info(f"🔄 传感器轮询已启动 (间隔 {interval}s)")
 
-    def stop_polling(self):
+    def stop_polling(self) -> None:
         if self._polling_task:
             self._polling_task.cancel()
             self._polling_task = None
 
-    async def shutdown_all(self):
+    async def shutdown_all(self) -> None:
         """关闭所有传感器。"""
         self.stop_polling()
         for sensor in self._sensors.values():

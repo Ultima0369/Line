@@ -38,7 +38,7 @@ class CloudBridge:
         self._client: Optional[httpx.AsyncClient] = None
         self._system_prompt: str = self._default_system_prompt()
 
-    async def initialize(self, config: Optional[Dict] = None):
+    async def initialize(self, config: Optional[Dict] = None) -> None:
         """初始化云端桥接器。"""
         if config:
             self.config = config
@@ -160,40 +160,61 @@ class CloudBridge:
         }
 
         url = f"{self._base_url}/chat/completions"
-        try:
-            resp = await self._client.post(url, json=payload)
-            resp.raise_for_status()
-            data = resp.json()
+        data = await self._post_with_retry(url, payload)
+        if data is None:
+            return {"content": "❌ 云端请求失败（已重试）。", "reasoning": "", "usage": {}, "latency": 0}
 
-            latency = time.time() - start_time
-            choice = data.get("choices", [{}])[0]
-            message = choice.get("message", {})
+        latency = time.time() - start_time
+        choice = data.get("choices", [{}])[0]
+        message = choice.get("message", {})
 
-            result = {
-                "content": message.get("content", ""),
-                "reasoning": message.get("reasoning_content", ""),
-                "usage": data.get("usage", {}),
-                "latency": round(latency, 2),
-            }
+        result = {
+            "content": message.get("content", ""),
+            "reasoning": message.get("reasoning_content", ""),
+            "usage": data.get("usage", {}),
+            "latency": round(latency, 2),
+        }
 
-            logger.info(
-                f"☁️ 云端响应 ({latency:.1f}s | "
-                f"input: {data.get('usage', {}).get('prompt_tokens', '?')}tokens)"
-            )
-            return result
+        logger.info(
+            f"☁️ 云端响应 ({latency:.1f}s | "
+            f"input: {data.get('usage', {}).get('prompt_tokens', '?')}tokens)"
+        )
+        return result
 
-        except httpx.TimeoutException:
-            logger.error("云端请求超时")
-            return {"content": "⏰ 云端请求超时，请稍后重试。", "reasoning": "", "usage": {}, "latency": 0}
-        except httpx.HTTPStatusError as e:
-            logger.error(f"云端请求失败: {e.response.status_code} {e.response.text[:100]}")
-            return {"content": f"❌ 云端请求失败 ({e.response.status_code})", "reasoning": "", "usage": {}, "latency": 0}
-        except httpx.RequestError as e:
-            logger.error(f"云端连接失败: {e}")
-            return {"content": f"❌ 云端连接失败: {str(e)[:100]}", "reasoning": "", "usage": {}, "latency": 0}
-        except Exception as e:
-            logger.error(f"未知错误: {e}")
-            return {"content": "❌ 未知错误", "reasoning": "", "usage": {}, "latency": 0}
+    async def _post_with_retry(self, url: str, payload: Dict) -> Optional[Dict]:
+        """POST 并对可重试错误（超时/429/5xx）做指数退避重试。
+
+        4xx（除 429）不重试——那是请求本身的问题。
+        返回解析后的 JSON dict，或 None（彻底失败）。
+        """
+        max_retries = int(self.config.get("max_retries", 3))
+        backoff = 0.5
+
+        for attempt in range(max_retries + 1):
+            try:
+                resp = await self._client.post(url, json=payload)
+                resp.raise_for_status()
+                return resp.json()
+            except httpx.TimeoutException:
+                retryable = True
+                logger.warning(f"云端超时 (attempt {attempt + 1}/{max_retries + 1})")
+            except httpx.HTTPStatusError as e:
+                code = e.response.status_code
+                # 429 (限流) 和 5xx (服务端) 可重试；其余 4xx 是请求问题，不重试
+                retryable = code == 429 or 500 <= code < 600
+                logger.warning(f"云端 HTTP {code} (attempt {attempt + 1}/{max_retries + 1}, retryable={retryable})")
+            except httpx.RequestError as e:
+                retryable = True
+                logger.warning(f"云端连接失败: {e} (attempt {attempt + 1}/{max_retries + 1})")
+            except Exception as e:
+                logger.error(f"未知错误（不重试）: {e}")
+                return None
+
+            if not retryable or attempt == max_retries:
+                return None
+            await asyncio.sleep(backoff)
+            backoff *= 2
+        return None
 
     async def ask_stream(self, upstream: Dict, **kwargs) -> AsyncGenerator[str, None]:
         """流式请求（逐 chunk 返回内容文本）。"""
@@ -242,7 +263,7 @@ class CloudBridge:
             logger.error(f"流式请求失败: {e}")
             yield f"\n❌ 流式请求中断: {str(e)[:80]}"
 
-    async def shutdown(self):
+    async def shutdown(self) -> None:
         """关闭连接。"""
         if self._client:
             await self._client.aclose()
