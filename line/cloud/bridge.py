@@ -112,22 +112,61 @@ class CloudBridge:
 
         return "\n\n".join(parts)
 
+    def _sample_params_from_attention(self, upstream: Dict) -> Dict[str, float]:
+        """根据上行数据里的注意力状态推导采样参数。
+
+        这是"认知架构"真正落地的点：注意力分数不再只塞一句话进 prompt，
+        而是改变云端推理的采样行为。
+
+        映射依据（可调）:
+        - active（高注意力，环境/输入异常，已在聚焦难题）→ 降 temperature，
+          让模型更确定、更聚焦于手头问题，少发散。
+        - calm（低注意力，环境平稳，认知可松弛）→ 升 temperature，
+          让模型发散，利于背景信息流动碰撞（对应 attention.py 里"阴的领域酝酿"）。
+
+        注意力级别是 0-1 的浮点，映射到 temperature 区间 [0.3, 1.0]。
+        ponytail: 线性映射 + 钳位，够用且可解释；要更精细可换成分段。
+        """
+        attention = upstream.get("attention") or ""
+        level = self._parse_attention_level(attention)
+
+        # level 越高 → 越聚焦 → temperature 越低
+        # level=1.0 → temp 0.3 ; level=0.0 → temp 1.0
+        temp = round(1.0 - level * 0.7, 2)
+        temp = max(0.3, min(1.0, temp))
+        return {"temperature": temp}
+
+    @staticmethod
+    def _parse_attention_level(attention: str) -> float:
+        """从紧凑注意力串 'l:0.6|s:active' 解析出 level，失败回中性 0.5。"""
+        if not attention:
+            return 0.5
+        for part in attention.split("|"):
+            if part.startswith("l:"):
+                try:
+                    return float(part[2:])
+                except ValueError:
+                    return 0.5
+        return 0.5
+
     async def ask(
         self,
         upstream: Dict,
-        temperature: float = 0.7,
+        temperature: Optional[float] = None,
         max_tokens: int = 4096,
         stream: bool = False,
     ) -> Dict:
         """向云端发送上行数据包并获取回复。
 
         upstream: SemanticProtocol.build_upstream 的返回值。
+        temperature: 显式覆盖。None 时由注意力状态推导（高注意力→低温度聚焦）。
         返回:
             {
                 "content": "回复内容",
                 "reasoning": "推理过程（如有）",
                 "usage": {"prompt_tokens": N, "completion_tokens": N},
                 "latency": 1.23,
+                "temperature": 实际使用的采样温度,
             }
         """
         if not self._api_key:
@@ -151,6 +190,10 @@ class CloudBridge:
 
         start_time = time.time()
 
+        # 注意力驱动的采样温度（认知架构落地：分数改变推理行为）
+        if temperature is None:
+            temperature = self._sample_params_from_attention(upstream)["temperature"]
+
         payload = {
             "model": self._model,
             "messages": messages,
@@ -173,6 +216,7 @@ class CloudBridge:
             "reasoning": message.get("reasoning_content", ""),
             "usage": data.get("usage", {}),
             "latency": round(latency, 2),
+            "temperature": temperature,
         }
 
         logger.info(

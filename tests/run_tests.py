@@ -121,6 +121,40 @@ def test_drain_clears_alerts():
     assert edge.drain_alerts() == []
 
 
+def test_attention_drives_temperature():
+    """认知架构落地点：注意力状态驱动云端采样温度。
+
+    active（高注意力）→ 降温度聚焦；calm（低注意力）→ 升温度发散。
+    不再只塞一句话进 prompt，而是改变推理参数。
+    """
+    from line.cloud.bridge import CloudBridge
+    b = CloudBridge({"api_key": "fake"})
+
+    # 高注意力 level=0.9 → 应低温度（聚焦）
+    up_active = {"user": "x", "attention": "l:0.9|s:active"}
+    t_active = b._sample_params_from_attention(up_active)["temperature"]
+    # 低注意力 level=0.1 → 应高温度（发散）
+    up_calm = {"user": "x", "attention": "l:0.1|s:calm"}
+    t_calm = b._sample_params_from_attention(up_calm)["temperature"]
+
+    assert t_active < t_calm, f"高注意力应更低温度: active={t_active} calm={t_calm}"
+    assert 0.3 <= t_active <= 1.0, t_active
+    assert 0.3 <= t_calm <= 1.0, t_calm
+    # level=1.0 → temp 0.3 ; level=0.0 → temp 1.0
+    assert b._sample_params_from_attention({"user": "x", "attention": "l:1.0|s:active"})["temperature"] == 0.3
+    assert b._sample_params_from_attention({"user": "x", "attention": "l:0.0|s:calm"})["temperature"] == 1.0
+
+
+def test_attention_level_parse_fallback():
+    """注意力串解析失败时回中性 0.5，不崩。"""
+    from line.cloud.bridge import CloudBridge
+    b = CloudBridge({})
+    assert CloudBridge._parse_attention_level("l:0.7|s:active") == 0.7
+    assert CloudBridge._parse_attention_level("") == 0.5
+    assert CloudBridge._parse_attention_level("garbage") == 0.5
+    assert CloudBridge._parse_attention_level("l:notanumber") == 0.5
+
+
 def test_cloudbridge_ask_no_key_degrades():
     """无 API key 时 ask 应优雅降级，不抛异常。"""
     import asyncio

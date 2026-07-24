@@ -107,11 +107,13 @@ async def interactive_mode():
 
         print(f"\n  🤖 {response}")
 
-        # 显示延迟和用量
+        # 显示延迟和用量（含注意力驱动的采样温度）
         latency = cloud_response.get("latency", 0)
         usage = cloud_response.get("usage", {})
+        temp = cloud_response.get("temperature")
+        temp_str = f" | T:{temp}" if temp is not None else ""
         if usage:
-            print(f"\n  ── ({latency}s | 输入: {usage.get('prompt_tokens', '?')}t | 输出: {usage.get('completion_tokens', '?')}t)")
+            print(f"\n  ── ({latency}s | 输入: {usage.get('prompt_tokens', '?')}t | 输出: {usage.get('completion_tokens', '?')}t{temp_str})")
 
     edge.on_upstream(upstream_handler)
 
