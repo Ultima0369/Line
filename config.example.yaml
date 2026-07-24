@@ -1,0 +1,82 @@
+# ============================================
+# Line Framework 配置文件
+# ============================================
+
+# --- 云端连接 ---
+cloud:
+  api_key: ""              # DeepSeek API密钥（必填）
+  base_url: "https://api.deepseek.com"
+  model: "deepseek-reasoner"  # 云端模型
+  timeout: 60               # 超时秒数
+  max_retries: 3            # 重试次数
+
+# --- 本地边缘处理 ---
+edge:
+  enabled: true
+  mode: "api"               # "api" | "local_model" | "rule"
+  
+  # mode = "api" 时的小模型配置
+  mini_model:
+    api_key: ""             # 若与云端不同则填写
+    model: "deepseek-chat"  # 小型模型
+    max_tokens: 512
+  
+  # mode = "local_model" 时的配置（需安装torch+transformers）
+  local_model:
+    name: ""                # HuggingFace模型名，如 "Qwen/Qwen2.5-1.5B-Instruct"
+    device: "cpu"           # "cpu" | "cuda"
+    quantize: true          # 是否量化
+
+  # 上下文管理
+  context:
+    max_turns: 20           # 本地保留的最大对话轮次
+    summary_threshold: 10   # 超过此轮次开始自动摘要压缩
+    enable_compression: true
+
+# --- 传感器 ---
+sensor:
+  enabled: false            # 有传感器硬件时设为true
+  scan_on_start: true       # 启动时自动扫描可用传感器
+  mock: true                # 无硬件时用模拟数据
+  
+  drivers:
+    # 温湿度 (DHT11/DHT22)
+    dht:
+      enabled: false
+      pin: 4                # GPIO引脚号（树莓派）
+      type: "DHT22"         # DHT11 或 DHT22
+    
+    # 气压 (BMP280/BME280)
+    pressure:
+      enabled: false
+      bus: 1                # I2C总线
+      address: 0x76         # I2C地址
+    
+    # 光照 (BH1750)
+    light:
+      enabled: false
+      bus: 1
+      address: 0x23
+
+    # 系统传感器（CPU温度、内存等）
+    system:
+      enabled: true
+      interval: 10          # 采集间隔（秒）
+
+    # 音频 (麦克风)
+    audio:
+      enabled: false
+      device: null          # null = 默认设备
+      sample_rate: 16000
+
+# --- 语义协议 ---
+protocol:
+  compression_level: 3      # 1-5，越高压缩越狠
+  enable_encryption: false  # 是否编码特征向量（不是真加密，而是语义编码）
+  sync_interval: 5          # 云端同步间隔（秒）
+
+# --- 日志 ---
+logging:
+  level: "INFO"             # DEBUG | INFO | WARNING | ERROR
+  file: "line.log"
+  console: true

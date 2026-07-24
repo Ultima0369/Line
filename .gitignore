@@ -1,0 +1,42 @@
+# Line Framework .gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+*.egg
+
+# 环境
+.env
+venv/
+.venv/
+env/
+
+# 日志
+*.log
+
+# 配置（含API Key，请勿提交）
+config.yaml
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# 传感器数据缓存
+*.sensor_cache
+
+# 本地模型文件
+models/
+*.bin
+*.pt
+*.pth
