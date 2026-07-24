@@ -42,23 +42,15 @@ async def main():
     
     # 连接：边缘 → 云端
     async def on_upstream(upstream: dict):
-        sensor_ctx = upstream.get("sensor", "")
-        attention_ctx = upstream.get("attention", "")
-        user_input = upstream.get("user", "")
-        
-        if not user_input.strip():
+        if not upstream.get("user", "").strip():
             return
-        
+
         print(f"\n  ┌─ 📤 上行数据包")
-        print(f"  │ 传感器: {sensor_ctx or '(无)'}")
-        print(f"  │ 注意力: {attention_ctx or '(无)'}")
+        print(f"  │ 传感器: {upstream.get('sensor') or '(无)'}")
+        print(f"  │ 注意力: {upstream.get('attention') or '(无)'}")
         print(f"  └─ 发送至云端...")
-        
-        response = await cloud.ask(
-            user_input=user_input,
-            sensor_context=sensor_ctx,
-            attention_context=attention_ctx,
-        )
+
+        response = await cloud.ask(upstream=upstream)
         
         result = await edge.receive_downstream(response)
         print(f"\n  🤖 {result}\n")

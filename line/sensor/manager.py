@@ -26,6 +26,7 @@ class SensorManager:
     def __init__(self):
         self._sensors: Dict[str, Sensor] = {}
         self._callbacks: List[Callable[[SensorReading], Awaitable[None]]] = []
+        self._batch_callbacks: List[Callable[[Dict[str, List[SensorReading]]], Awaitable[None]]] = []
         self._polling_task: Optional[asyncio.Task] = None
 
     async def register(self, sensor: Sensor) -> bool:
@@ -106,7 +107,14 @@ class SensorManager:
                         await cb(reading)
                     except Exception as e:
                         logger.error(f"回调异常: {e}")
-        
+
+        # 触发批量回调（注意力评估等需要整批上下文的消费者）
+        for cb in self._batch_callbacks:
+            try:
+                await cb(results)
+            except Exception as e:
+                logger.error(f"批量回调异常: {e}")
+
         return results
 
     async def _safe_read(self, sensor: Sensor) -> Optional[SensorReading]:
@@ -119,6 +127,10 @@ class SensorManager:
     def on_reading(self, callback: Callable[[SensorReading], Awaitable[None]]):
         """注册读数回调（每次读取完成后触发）。"""
         self._callbacks.append(callback)
+
+    def on_batch(self, callback: Callable[[Dict[str, List[SensorReading]]], Awaitable[None]]):
+        """注册批量读数回调（每次完整轮询后触发，收全部分组结果）。"""
+        self._batch_callbacks.append(callback)
 
     def start_polling(self, interval: float = 5.0):
         """启动持续轮询。"""

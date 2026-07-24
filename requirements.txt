@@ -1,9 +1,9 @@
 # Line Framework — 核心依赖
 # 安装: pip install -r requirements.txt
 
-requests>=2.28.0          # 调用 DeepSeek API
-pyyaml>=6.0              # 配置管理
-pydantic>=2.0.0          # 数据模型
+httpx>=0.27.0            # 异步 HTTP 客户端（调用 DeepSeek API，不阻塞 event loop）
+pyyaml>=6.0             # 配置管理
+pydantic>=2.0.0         # 数据模型
 
 # === 可选依赖（按需安装） ===
 # psutil>=5.9.0          # 系统传感器（CPU/内存）

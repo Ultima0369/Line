@@ -80,20 +80,16 @@ async def interactive_mode():
 
     # 连接边缘与云端
     async def upstream_handler(upstream: dict):
-        """当边缘处理器产生上行数据包时，自动转发到云端。"""
-        sensor_context = upstream.get("sensor", "")
-        attention_context = upstream.get("attention", "")
-        user_input = upstream.get("user", "")
+        """当边缘处理器产生上行数据包时，自动转发到云端。
 
-        if not user_input.strip():
+        upstream 是 SemanticProtocol.build_upstream 的返回值，
+        bridge 据此拼带环境上下文的 system prompt。
+        """
+        if not upstream.get("user", "").strip():
             return
 
-        # 调用云端
-        cloud_response = await cloud.ask(
-            user_input=user_input,
-            sensor_context=sensor_context,
-            attention_context=attention_context,
-        )
+        # 调用云端（消费整个 upstream）
+        cloud_response = await cloud.ask(upstream=upstream)
 
         # 接收云端回复
         response = await edge.receive_downstream(cloud_response)
@@ -119,10 +115,17 @@ async def interactive_mode():
 
     edge.on_upstream(upstream_handler)
 
+    # 传感器轮询 → 注意力评估：读数喂给注意力过滤器，
+    # 超阈值的环境事件入队，下一轮对话前注入。
+    async def attention_on_batch(batch):
+        edge.evaluate_sensor_batch(batch)
+
+    sensor_manager.on_batch(attention_on_batch)
+
     # 启动传感器轮询
     if sensor_config.get("enabled", False) or sensor_config.get("mock", True):
         sensor_manager.start_polling(interval=5.0)
-        logger.info("🔄 传感器轮询已启动 (每5秒)")
+        logger.info("🔄 传感器轮询已启动 (每5秒, 注意力评估已接入)")
 
     print("\n  🤖 双脑就绪。输入你的消息开始对话。")
     print("  📝 输入 /help 查看命令  |  /exit 退出\n")
@@ -130,6 +133,12 @@ async def interactive_mode():
     # 对话循环
     try:
         while True:
+            # 注入待处理的环境事件（注意力调度产出）
+            alerts = edge.drain_alerts()
+            if alerts:
+                print()
+                for a in alerts:
+                    print(f"  {a}")
             try:
                 user_input = await asyncio.get_event_loop().run_in_executor(
                     None, lambda: input("  👤 ")
